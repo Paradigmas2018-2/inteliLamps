@@ -9,6 +9,6 @@ services:
       - "8001:8001"
       - "3000:3000"
       - "20000:20000"
-    tty: true
-    stdin_open: true
-    command: pade hello_agent.py
+    # tty: true
+    # stdin_open: true
+    command: pade --config_file pade_config.json
