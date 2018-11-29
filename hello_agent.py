@@ -8,7 +8,36 @@ import random
 import time
 import json
 import datetime
+import asyncio
+import datetime
+import random
+import threading
+import websockets
 
+agents = list()
+nodes = {}
+nodes['notification_counter'] = 0
+
+async def ws_time(websocket, path):
+    while True:
+        response = {}
+        response['nodes_list'] = []
+        for name in nodes:
+            if name != 'notification_counter':
+                node_info = nodes[name]
+                response['nodes_list'].append({
+                    'id': int(name[:name.find('#')]),
+                    'status': node_info['power']
+                })
+
+        await websocket.send(str(json.dumps(response)))
+        await asyncio.sleep(0.5)
+
+def ws_start_async():
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    start_server = websockets.serve(ws_time, '127.0.0.1', 5001)
+    asyncio.get_event_loop().run_until_complete(start_server)
+    asyncio.get_event_loop().run_forever()
 
 def my_time(a, b):
     print('------> I will sleep now!', a)
@@ -38,6 +67,11 @@ class SubscriberProtocol(FipaSubscribeProtocol):
                 display_message(self.agent.aid.name, 'Turning lights on...')
             else:
                 display_message(self.agent.aid.name, 'Insuficient power...')
+
+        nodes[self.agent.aid.name] = {
+            'power': self.agent.power,
+            'max_power': self.agent.max_power
+        }
 
 class PublisherProtocol(FipaSubscribeProtocol):
 
@@ -75,6 +109,7 @@ class Time(TimedBehaviour):
         message = ACLMessage(ACLMessage.INFORM)
         message.set_protocol(ACLMessage.FIPA_SUBSCRIBE_PROTOCOL)
         message.set_content('Switch lights')
+        nodes['notification_counter'] += 1
         self.notify(message)
 
 
@@ -85,6 +120,10 @@ class AgentSubscriber(Agent):
         self.max_power = 100
         self.power = False
         self.call_later(8.0, self.launch_subscriber_protocol, message)
+        nodes[aid.name] = {
+            'power': self.power,
+            'max_power': self.max_power
+        }
 
     def launch_subscriber_protocol(self, message):
         self.protocol = SubscriberProtocol(self, message)
@@ -105,7 +144,13 @@ class AgentPublisher(Agent):
 
         call_in_thread(my_time, aid.name, aid.name)
 
+
 if __name__ == '__main__':
+
+    print("Attempting to start WebSocket...")
+    thr = threading.Thread(target=ws_start_async, args=(), kwargs={})
+    thr.start()
+    print("WebSocket started...")
 
     agents_per_process = 1
     agents = list()
@@ -113,7 +158,7 @@ if __name__ == '__main__':
     subscriber_index = 1
     for i in range(agents_per_process):        
 
-        agent_name = 'agent_publisher_{}:{}'.format(i, port)
+        agent_name = 'agent_publisher_{}'.format(i)
         agent_pub_1 = AgentPublisher(AID(name=agent_name))
         agents.append(agent_pub_1)
         port += 1
@@ -123,15 +168,15 @@ if __name__ == '__main__':
         msg.set_content('Subscription request')
         msg.add_receiver(agent_pub_1.aid)
 
-        number_of_lamps = 3
+        number_of_lamps = 7
 
         for l in range(number_of_lamps):
-            agent_name = 'agent_subscriber_{}:{}'.format(subscriber_index, port)
+            agent_name = '{}#_agent_subscriber'.format(subscriber_index)
             agent_sub = AgentSubscriber(AID(name=agent_name), msg)
             agents.append(agent_sub)
             port += 1
             subscriber_index += 1
 
             time.sleep(1)
-
+            
     start_loop(agents)
