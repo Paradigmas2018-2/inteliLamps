@@ -1,6 +1,6 @@
 {
     "agent_files": [
-        "hello_agent.py"
+        "poste.py"
     ],
     "port": 20000,
     "num": 1,

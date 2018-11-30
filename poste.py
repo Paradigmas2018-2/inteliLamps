@@ -17,6 +17,14 @@ import websockets
 agents = list()
 nodes = {}
 nodes['notification_counter'] = 0
+global_central_on = {}
+global_central_on['status'] = False
+
+def updateCentral():
+    if global_central_on['status']:
+        global_central_on['status'] = False
+    else:
+        global_central_on['status'] = True
 
 async def ws_time(websocket, path):
     while True:
@@ -27,9 +35,10 @@ async def ws_time(websocket, path):
                 node_info = nodes[name]
                 response['nodes_list'].append({
                     'id': int(name[:name.find('#')]),
-                    'status': node_info['power']
+                    'status': node_info['power'],
+                    'health': node_info['max_power']
                 })
-
+        response['central_on'] = global_central_on['status']
         await websocket.send(str(json.dumps(response)))
         await asyncio.sleep(0.5)
 
@@ -63,10 +72,12 @@ class SubscriberProtocol(FipaSubscribeProtocol):
                 display_message(self.agent.aid.name, 'Turning lights off. Max power: {}'.format(self.agent.max_power))
         else:
             if self.agent.max_power >= 50:
-                self.agent.power = True
-                display_message(self.agent.aid.name, 'Turning lights on...')
+                if global_central_on['status']:
+                    self.agent.power = True
+                    display_message(self.agent.aid.name, 'Turning lights on...')
             else:
-                display_message(self.agent.aid.name, 'Insuficient power...')
+                display_message(self.agent.aid.name, 'Insuficient power... Attempting to fix')
+                self.agent.max_power += random.randint(10, 50)
 
         nodes[self.agent.aid.name] = {
             'power': self.agent.power,
@@ -94,6 +105,7 @@ class PublisherProtocol(FipaSubscribeProtocol):
 
     def notify(self, message):
         display_message(self.agent.aid.name, 'Attempting to send signal to lamps.')
+        updateCentral()
         super(PublisherProtocol, self).notify(message)
 
 
@@ -113,10 +125,10 @@ class Time(TimedBehaviour):
         self.notify(message)
 
 
-class AgentSubscriber(Agent):
+class Poste(Agent):
 
     def __init__(self, aid, message):
-        super(AgentSubscriber, self).__init__(aid)
+        super(Poste, self).__init__(aid)
         self.max_power = 100
         self.power = False
         self.call_later(8.0, self.launch_subscriber_protocol, message)
@@ -131,13 +143,14 @@ class AgentSubscriber(Agent):
         self.protocol.on_start()
 
 
-class AgentPublisher(Agent):
+class Central(Agent):
 
     def __init__(self, aid):
-        super(AgentPublisher, self).__init__(aid)
+        super(Central, self).__init__(aid)
 
         self.protocol = PublisherProtocol(self)
         self.timed = Time(self, self.protocol.notify)
+        self.central_on = False
 
         self.behaviours.append(self.protocol)
         self.behaviours.append(self.timed)
@@ -159,7 +172,7 @@ if __name__ == '__main__':
     for i in range(agents_per_process):        
 
         agent_name = 'agent_publisher_{}'.format(i)
-        agent_pub_1 = AgentPublisher(AID(name=agent_name))
+        agent_pub_1 = Central(AID(name=agent_name))
         agents.append(agent_pub_1)
         port += 1
 
@@ -172,7 +185,7 @@ if __name__ == '__main__':
 
         for l in range(number_of_lamps):
             agent_name = '{}#_agent_subscriber'.format(subscriber_index)
-            agent_sub = AgentSubscriber(AID(name=agent_name), msg)
+            agent_sub = Poste(AID(name=agent_name), msg)
             agents.append(agent_sub)
             port += 1
             subscriber_index += 1
